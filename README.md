@@ -1,6 +1,8 @@
 # vowel-xmodal-pcn
 Use multimodal predictive coding networks to detect vowel boundaries in child-directed song.
 
+![Schematic of project structure](BrainHackImage.png)
+
 ## Summary
 This project uses a multimodal predictive coding network, implemented in `omni-pcn`, to find vowel boundaries in
 audiovisual recordings of child-directed song. It is intended to help human coders in situations where either the audio
