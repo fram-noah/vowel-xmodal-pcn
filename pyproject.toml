@@ -1,0 +1,27 @@
+[project]
+name = "brainhack"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "numpy==2.5.2",
+    "pytest==9.1.1",
+]
+
+[tool.uv]
+package = false
+default-groups = ["plot"]
+
+# Pull the predictive-coding library straight from GitHub. To develop against a
+# local checkout instead, replace this with:
+#   pcn = { path = "../omni-pcn", editable = true }
+[tool.uv.sources]
+pcn = { git = "https://github.com/nsdumont/omni-pcn.git" }
+
+[dependency-groups]
+plot = ["matplotlib>=3.6.3"]
+
+# Platform accelerators — install exactly one to match your hardware:
+#   uv sync --group cuda   (Linux / NVIDIA)
+#   uv sync --group mps    (macOS / Apple Silicon)
+cuda = ["jax[cuda12]==0.9.2"]
+mps = ["jax-mps==0.9.13; sys_platform == 'darwin' and platform_machine == 'arm64'"]

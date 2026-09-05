@@ -8,6 +8,16 @@ This project uses a multimodal predictive coding network, implemented in `omni-p
 audiovisual recordings of child-directed song. It is intended to help human coders in situations where either the audio
 or video signal is degraded or absent.
 
+## Instructions
+
+Clone the repository.
+1) In your terminal or command prompt, navigate to the location you want the repository to live.
+2) Run the command `git clone https://github.com/fram-noah/vowel-xmodal-pcn`
+
+Download and install the `omni-pcn` package (see instructions below).
+
+Start hacking!
+
 ## Dependencies
 `omni-pcn`: https://github.com/nsdumont/omni-pcn
 
