@@ -7,17 +7,23 @@ requires-python = ">=3.13"
 
 dependencies = [
     "pcn",
+    "numpy==2.5.2",
+    "jax==0.9.2",
+    "optax==0.2.5",
 ]
 
 [project.optional-dependencies]
 # Only needed for examples/basic_av_demo.py's plot; the demo runs fine without it.
 plot = ["matplotlib"]
+test = ["pytest==9.1.1"]
 
 [tool.uv.sources]
 # omni-pcn is expected to be checked out as a sibling directory (see README):
 #   phoneme-boundaries/
 #   ├── omni-pcn/
 #   └── vowel-xmodal-pcn/
+# To pull it straight from GitHub instead, replace this with:
+#   pcn = { git = "https://github.com/nsdumont/omni-pcn.git" }
 pcn = { path = "../omni-pcn", editable = true }
 
 [build-system]
