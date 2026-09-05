@@ -1,0 +1,28 @@
+[project]
+name = "vowel-xmodal-pcn"
+version = "0.1.0"
+description = "Multimodal predictive coding network for detecting vowel boundaries in child-directed song, built on omni-pcn."
+readme = "README.md"
+requires-python = ">=3.13"
+
+dependencies = [
+    "pcn",
+]
+
+[project.optional-dependencies]
+# Only needed for examples/basic_av_demo.py's plot; the demo runs fine without it.
+plot = ["matplotlib"]
+
+[tool.uv.sources]
+# omni-pcn is expected to be checked out as a sibling directory (see README):
+#   phoneme-boundaries/
+#   ├── omni-pcn/
+#   └── vowel-xmodal-pcn/
+pcn = { path = "../omni-pcn", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["av_pcn"]
