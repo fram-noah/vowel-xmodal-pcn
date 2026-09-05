@@ -1,8 +1,19 @@
 import pcn
 
+class Params:
+    framerate = 30
+    audiorate = 44100
+
+
+def default_params():
+    """Set default parameters for PCN construction."""
+
+
 def make_network(params):
     # Start with a simple model with a single hidden layer
     net = pcn.PCNetwork()
+
+
 
     with net:
         l_img_input = pcn.Layer(dim=image_dim, activation=pcn.Direct(), label="image")
