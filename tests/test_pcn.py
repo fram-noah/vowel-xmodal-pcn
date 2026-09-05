@@ -7,6 +7,8 @@ import jax.numpy as jnp
 import pcn
 import pytest
 
+from audio_windowing import audio_window
+
 # Things we need tests for [PLEASE ADD TO LIST!]:
 #   1. Model structure is connected
 #   2. Input dimensions match signal dimensions
@@ -52,8 +54,12 @@ def make_audiolayer():
 class TestInputs:
     def test_windowmatch(self):
         """Every video frame should have exactly one audio window matched to it."""
-        audio_windowed = audio_window()
-        assert len(audio_windowed) == n_frames
+        fs, framerate, n_frames = 48000, 30, 20
+        rng = numpy.random.default_rng(0)
+        wave = rng.standard_normal(fs * 2).astype(numpy.float32)  # 2s of audio
+        audio_windowed, mask = audio_window(wave, fs, framerate, n_frames)
+        assert audio_windowed.shape[0] == n_frames
+        assert mask.shape == audio_windowed.shape
 
     def test_audiospec(self):
         """Audio spectrogram computation (omni-pcn's AuditoryInput) should run
