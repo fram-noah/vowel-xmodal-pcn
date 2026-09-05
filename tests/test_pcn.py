@@ -20,11 +20,40 @@ import pytest
 # model architecture, which are still open BrainHack 2026 goals (see the issue),
 # so they stay skipped until that code exists.
 
+def make_audiolayer():
+    net = pcn.PCNetwork(seed=0)
+    with net:
+        # Wraps the STFT -> mel-power -> compression pipeline described in
+        # audio.py. n_samples is the raw waveform length this layer expects;
+        # sr/n_fft/hop/n_mels are standard spectrogram parameters.
+        aud = pcn.AuditoryInput(
+            n_samples=4096, sr=16000, n_fft=512, hop=256, n_mels=32,
+            griffin_lim_iters=4, label="aud",
+        )
+
+    # Fake a batch of 3 raw audio clips (random noise -- we're only testing
+    # that the pipeline runs and produces sane numbers, not real audio content).
+    rng = numpy.random.default_rng(0)
+    wave = rng.standard_normal((3, 4096)).astype(numpy.float32)
+    # encode() runs the waveform through the spectrogram pipeline and
+    # flattens the result to (batch, feature_dim).
+    feats = aud.encode(jnp.asarray(wave))
+    return feats
+
+# def audio_window(audiosig, fs, framerate):
+#     samps_per_window = jnp.floor(fs / framerate)
+#     n_windows = audiosig.shape[0] / samps_per_window
+#     audio_windowed = []
+#     for iwin in range(n_windows):
+#         this_window = audiosig[samps_per_window * iwin,:]
+#         audio_windowed.append(this_window)
+#     return audio_windowed
 
 class TestInputs:
     def test_windowmatch(self):
         """Every video frame should have exactly one audio window matched to it."""
-        pytest.skip("Awaiting this project's audio/video windowing implementation")
+        audio_windowed = audio_window()
+        assert len(audio_windowed) == n_frames
 
     def test_audiospec(self):
         """Audio spectrogram computation (omni-pcn's AuditoryInput) should run
@@ -32,23 +61,7 @@ class TestInputs:
         # `AuditoryInput` is a pcn.Layer, and layers can only be created while a
         # PCNetwork is "open" (inside the `with net:` block) -- that's how pcn
         # tracks which layers belong to which network.
-        net = pcn.PCNetwork(seed=0)
-        with net:
-            # Wraps the STFT -> mel-power -> compression pipeline described in
-            # audio.py. n_samples is the raw waveform length this layer expects;
-            # sr/n_fft/hop/n_mels are standard spectrogram parameters.
-            aud = pcn.AuditoryInput(
-                n_samples=4096, sr=16000, n_fft=512, hop=256, n_mels=32,
-                griffin_lim_iters=4, label="aud",
-            )
-
-        # Fake a batch of 3 raw audio clips (random noise -- we're only testing
-        # that the pipeline runs and produces sane numbers, not real audio content).
-        rng = numpy.random.default_rng(0)
-        wave = rng.standard_normal((3, 4096)).astype(numpy.float32)
-        # encode() runs the waveform through the spectrogram pipeline and
-        # flattens the result to (batch, feature_dim).
-        feats = aud.encode(jnp.asarray(wave))
+        feats = make_audiolayer()
 
         # Batch size preserved, and the flattened feature dim matches what
         # AuditoryInput reports as its output size.
