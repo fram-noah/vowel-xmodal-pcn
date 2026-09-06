@@ -6,6 +6,7 @@ import numpy
 import jax.numpy as jnp
 import pcn
 import pytest
+from hypothesis import given, settings, strategies as st
 
 # Things we need tests for [PLEASE ADD TO LIST!]:
 #   1. Model structure is connected
@@ -38,22 +39,75 @@ def make_audiolayer():
     # encode() runs the waveform through the spectrogram pipeline and
     # flattens the result to (batch, feature_dim).
     feats = aud.encode(jnp.asarray(wave))
-    return feats
+    return feats, aud
 
-# def audio_window(audiosig, fs, framerate):
-#     samps_per_window = jnp.floor(fs / framerate)
-#     n_windows = audiosig.shape[0] / samps_per_window
-#     audio_windowed = []
-#     for iwin in range(n_windows):
-#         this_window = audiosig[samps_per_window * iwin,:]
-#         audio_windowed.append(this_window)
-#     return audio_windowed
+
+def audio_window(audiosig, fs, framerate):
+    """Split a raw audio signal into consecutive, non-overlapping windows, one
+    per video frame -- `fs` is the audio sample rate, `framerate` the video fps.
+    Trailing samples that don't fill a whole window are dropped.
+
+    This is Noah's sketch (originally commented out, calling an undefined
+    function with undefined args -- see commit 1c14d0f), fixed up: the
+    original used float division for `n_windows` (can't `range()` a float) and
+    indexed a single row (`audiosig[samps_per_window * iwin, :]`) instead of
+    slicing a window of samples.
+    """
+    samples_per_window = int(fs // framerate)
+    if samples_per_window <= 0:
+        raise ValueError(f"framerate {framerate} too high for sample rate {fs}")
+    n_windows = len(audiosig) // samples_per_window
+    return [audiosig[i * samples_per_window:(i + 1) * samples_per_window]
+            for i in range(n_windows)]
+
 
 class TestInputs:
-    def test_windowmatch(self):
+    # Property-based test (Noah wants PBT coverage here): instead of checking
+    # one hand-picked (fs, framerate, duration), Hypothesis generates many
+    # combinations and checks the invariant holds for all of them -- exactly
+    # one audio window per "slot", every window the same length.
+    @given(
+        fs=st.integers(min_value=1000, max_value=48000),
+        framerate=st.integers(min_value=1, max_value=60),
+        duration=st.floats(min_value=0.05, max_value=3.0,
+                            allow_nan=False, allow_infinity=False),
+    )
+    def test_windowmatch(self, fs, framerate, duration):
         """Every video frame should have exactly one audio window matched to it."""
-        audio_windowed = audio_window()
-        assert len(audio_windowed) == n_frames
+        n_samples = int(fs * duration)
+        audiosig = numpy.zeros(n_samples, dtype=numpy.float32)
+        samples_per_window = fs // framerate
+
+        windows = audio_window(audiosig, fs, framerate)
+
+        expected_n_windows = n_samples // samples_per_window
+        assert len(windows) == expected_n_windows
+        assert all(len(w) == samples_per_window for w in windows)
+
+    @given(
+        seed=st.integers(min_value=0, max_value=2**31 - 1),
+        fs=st.integers(min_value=1000, max_value=48000),
+        framerate=st.integers(min_value=1, max_value=60),
+        duration=st.floats(min_value=0.05, max_value=2.0,
+                            allow_nan=False, allow_infinity=False),
+    )
+    def test_windowmatch_reconstructs_prefix(self, seed, fs, framerate, duration):
+        """Concatenating the windows back together should exactly reproduce a
+        prefix of the original signal (everything but the trailing remainder
+        that doesn't fill a whole window). A stronger check than counting
+        windows -- it also catches off-by-one slicing, dropped/duplicated/
+        reordered samples, or accidental mutation of the signal."""
+        n_samples = int(fs * duration)
+        rng = numpy.random.default_rng(seed)
+        audiosig = rng.standard_normal(n_samples).astype(numpy.float32)
+        samples_per_window = fs // framerate
+
+        windows = audio_window(audiosig, fs, framerate)
+
+        kept = len(windows) * samples_per_window
+        reconstructed = (numpy.concatenate(windows) if windows
+                         else numpy.array([], dtype=numpy.float32))
+        assert numpy.array_equal(reconstructed, audiosig[:kept])
 
     def test_audiospec(self):
         """Audio spectrogram computation (omni-pcn's AuditoryInput) should run
@@ -61,7 +115,7 @@ class TestInputs:
         # `AuditoryInput` is a pcn.Layer, and layers can only be created while a
         # PCNetwork is "open" (inside the `with net:` block) -- that's how pcn
         # tracks which layers belong to which network.
-        feats = make_audiolayer()
+        feats, aud = make_audiolayer()
 
         # Batch size preserved, and the flattened feature dim matches what
         # AuditoryInput reports as its output size.
@@ -69,6 +123,27 @@ class TestInputs:
         assert feats.shape[1] == numpy.prod(aud.feature_shape)
         # No NaN/Inf sneaking out of the FFT/log/compression math.
         assert bool(numpy.all(numpy.isfinite(numpy.asarray(feats))))
+
+    @settings(max_examples=20, deadline=None)
+    @given(seed=st.integers(min_value=0, max_value=2**31 - 1),
+           n=st.integers(min_value=1, max_value=5))
+    def test_audiospec_batch_independent(self, seed, n):
+        """Encoding a batch of clips together should give the exact same
+        per-clip features as encoding each clip alone. Batched tensor code
+        (the STFT/mel-power pipeline here) can easily leak values across the
+        batch axis through a wrong reshape/broadcast -- this property would
+        catch that even though single-example shape/finite checks wouldn't.
+        """
+        _, aud = make_audiolayer()
+        rng = numpy.random.default_rng(seed)
+        waves = rng.standard_normal((n, 4096)).astype(numpy.float32)
+
+        batched = numpy.asarray(aud.encode(jnp.asarray(waves)))
+        singles = numpy.stack([
+            numpy.asarray(aud.encode(jnp.asarray(waves[i:i + 1])))[0]
+            for i in range(n)
+        ])
+        assert numpy.allclose(batched, singles, atol=1e-4)
 
     def test_greyscale(self):
         """Greyscale video frames (VisualInput with color='gray') should encode
@@ -91,6 +166,27 @@ class TestInputs:
         assert feats.shape[1] == numpy.prod(vis.feature_shape)
         assert bool(numpy.all(numpy.isfinite(numpy.asarray(feats))))
 
+    @settings(max_examples=20, deadline=None)
+    @given(seed=st.integers(min_value=0, max_value=2**31 - 1),
+           n=st.integers(min_value=1, max_value=5))
+    def test_greyscale_batch_independent(self, seed, n):
+        """Same batch-independence property as test_audiospec_batch_independent,
+        for the video pathway: a batch of frames encoded together should match
+        encoding each frame alone."""
+        h, w = 28, 28
+        net = pcn.PCNetwork(seed=0)
+        with net:
+            vis = pcn.VisualInput(in_shape=(1, h, w), color="gray", label="vis")
+        rng = numpy.random.default_rng(seed)
+        frames = rng.random((n, h * w)).astype(numpy.float32)
+
+        batched = numpy.asarray(vis.encode(jnp.asarray(frames)))
+        singles = numpy.stack([
+            numpy.asarray(vis.encode(jnp.asarray(frames[i:i + 1])))[0]
+            for i in range(n)
+        ])
+        assert numpy.allclose(batched, singles, atol=1e-4)
+
     def test_greyscale_rejects_color_input(self):
         """color='gray' should reject 3-channel (RGB) input rather than silently
         averaging or mishandling the channels."""
@@ -101,6 +197,18 @@ class TestInputs:
         with net:
             with pytest.raises(ValueError):
                 pcn.VisualInput(in_shape=(3, 28, 28), color="gray")
+
+    @given(channels=st.integers(min_value=2, max_value=8).filter(lambda c: c != 3),
+           h=st.integers(min_value=4, max_value=32),
+           w=st.integers(min_value=4, max_value=32))
+    def test_visualinput_rejects_invalid_channel_counts(self, channels, h, w):
+        """Generalizes test_greyscale_rejects_color_input: VisualInput only
+        accepts 1 (gray) or 3 (RGB) input channels. Any other channel count
+        should be rejected regardless of the spatial size or color setting."""
+        net = pcn.PCNetwork(seed=0)
+        with net:
+            with pytest.raises(ValueError):
+                pcn.VisualInput(in_shape=(channels, h, w))
 
 
 def _build_toy_multimodal_net(seed=0, n_mel=8, n_video=4, hidden=16, n_out=2):
@@ -177,6 +285,28 @@ class TestModel:
 
         assert pred.shape == (n, n_out)
         assert bool(numpy.all(numpy.isfinite(pred)))
+
+    @settings(max_examples=10, deadline=None)
+    @given(
+        n_mel=st.integers(min_value=1, max_value=12),
+        n_video=st.integers(min_value=1, max_value=12),
+        hidden=st.integers(min_value=1, max_value=12),
+        n_out=st.integers(min_value=2, max_value=6),
+    )
+    def test_dimensionmatch_property(self, n_mel, n_video, hidden, n_out):
+        """Generalizes test_dimensionmatch: the single hardcoded (8, 4, 16, 2)
+        case could pass by coincidence (e.g. a builder that silently always
+        makes dim-8 layers). Random layer sizes rule that out -- the network
+        should build and its dims should always match what was requested,
+        whatever those sizes are. (max_examples kept low and deadline
+        disabled: JAX recompiles for each new shape, so this is slower per
+        example than the other property tests here.)
+        """
+        _, l_aud, l_vid, l_label = _build_toy_multimodal_net(
+            n_mel=n_mel, n_video=n_video, hidden=hidden, n_out=n_out)
+        assert l_aud.dim == n_mel
+        assert l_vid.dim == n_video
+        assert l_label.dim == n_out
 
 
 # We can also add tests here that look at output parameters, but I've kept things
