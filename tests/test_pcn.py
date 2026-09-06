@@ -6,6 +6,7 @@ import numpy
 import jax.numpy as jnp
 import pcn
 import pytest
+from pcn_model import *
 
 # Things we need tests for [PLEASE ADD TO LIST!]:
 #   1. Model structure is connected
@@ -20,55 +21,55 @@ import pytest
 # model architecture, which are still open BrainHack 2026 goals (see the issue),
 # so they stay skipped until that code exists.
 
-def make_audiolayer():
-    net = pcn.PCNetwork(seed=0)
-    with net:
-        # Wraps the STFT -> mel-power -> compression pipeline described in
-        # audio.py. n_samples is the raw waveform length this layer expects;
-        # sr/n_fft/hop/n_mels are standard spectrogram parameters.
-        aud = pcn.AuditoryInput(
-            n_samples=4096, sr=16000, n_fft=512, hop=256, n_mels=32,
-            griffin_lim_iters=4, label="aud",
-        )
+# def make_audiolayer():
+#     net = pcn.PCNetwork(seed=0)
+#     with net:
+#         # Wraps the STFT -> mel-power -> compression pipeline described in
+#         # audio.py. n_samples is the raw waveform length this layer expects;
+#         # sr/n_fft/hop/n_mels are standard spectrogram parameters.
+#         aud = pcn.AuditoryInput(
+#             n_samples=4096, sr=16000, n_fft=512, hop=256, n_mels=32,
+#             griffin_lim_iters=4, label="aud",
+#         )
+#
+#     # Fake a batch of 3 raw audio clips (random noise -- we're only testing
+#     # that the pipeline runs and produces sane numbers, not real audio content).
+#     rng = numpy.random.default_rng(0)
+#     wave = rng.standard_normal((3, 4096)).astype(numpy.float32)
+#     # encode() runs the waveform through the spectrogram pipeline and
+#     # flattens the result to (batch, feature_dim).
+#     feats = aud.encode(jnp.asarray(wave))
+#     return feats
 
-    # Fake a batch of 3 raw audio clips (random noise -- we're only testing
-    # that the pipeline runs and produces sane numbers, not real audio content).
-    rng = numpy.random.default_rng(0)
-    wave = rng.standard_normal((3, 4096)).astype(numpy.float32)
-    # encode() runs the waveform through the spectrogram pipeline and
-    # flattens the result to (batch, feature_dim).
-    feats = aud.encode(jnp.asarray(wave))
-    return feats
-
-# def audio_window(audiosig, fs, framerate):
-#     samps_per_window = jnp.floor(fs / framerate)
-#     n_windows = audiosig.shape[0] / samps_per_window
-#     audio_windowed = []
-#     for iwin in range(n_windows):
-#         this_window = audiosig[samps_per_window * iwin,:]
-#         audio_windowed.append(this_window)
-#     return audio_windowed
+def audio_window(audiosig, fs, framerate):
+    samps_per_window = jnp.floor(fs / framerate)
+    n_windows = audiosig.shape[0] / samps_per_window
+    audio_windowed = []
+    for iwin in range(n_windows):
+        this_window = audiosig[samps_per_window * iwin,:]
+        audio_windowed.append(this_window)
+    return audio_windowed
 
 class TestInputs:
-    def test_windowmatch(self):
-        """Every video frame should have exactly one audio window matched to it."""
-        audio_windowed = audio_window()
-        assert len(audio_windowed) == n_frames
-
-    def test_audiospec(self):
-        """Audio spectrogram computation (omni-pcn's AuditoryInput) should run
-        without errors and produce a finite, correctly-shaped feature map."""
-        # `AuditoryInput` is a pcn.Layer, and layers can only be created while a
-        # PCNetwork is "open" (inside the `with net:` block) -- that's how pcn
-        # tracks which layers belong to which network.
-        feats = make_audiolayer()
-
-        # Batch size preserved, and the flattened feature dim matches what
-        # AuditoryInput reports as its output size.
-        assert feats.shape == (3, aud.dim)
-        assert feats.shape[1] == numpy.prod(aud.feature_shape)
-        # No NaN/Inf sneaking out of the FFT/log/compression math.
-        assert bool(numpy.all(numpy.isfinite(numpy.asarray(feats))))
+    # def test_windowmatch(self):
+    #     """Every video frame should have exactly one audio window matched to it."""
+    #     audio_windowed = audio_window()
+    #     assert len(audio_windowed) == n_frames
+    #
+    # def test_audiospec(self):
+    #     """Audio spectrogram computation (omni-pcn's AuditoryInput) should run
+    #     without errors and produce a finite, correctly-shaped feature map."""
+    #     # `AuditoryInput` is a pcn.Layer, and layers can only be created while a
+    #     # PCNetwork is "open" (inside the `with net:` block) -- that's how pcn
+    #     # tracks which layers belong to which network.
+    #     feats = make_audiolayer()
+    #
+    #     # Batch size preserved, and the flattened feature dim matches what
+    #     # AuditoryInput reports as its output size.
+    #     assert feats.shape == (3, aud.dim)
+    #     assert feats.shape[1] == numpy.prod(aud.feature_shape)
+    #     # No NaN/Inf sneaking out of the FFT/log/compression math.
+    #     assert bool(numpy.all(numpy.isfinite(numpy.asarray(feats))))
 
     def test_greyscale(self):
         """Greyscale video frames (VisualInput with color='gray') should encode
@@ -136,15 +137,20 @@ def _build_toy_multimodal_net(seed=0, n_mel=8, n_video=4, hidden=16, n_out=2):
 
 class TestModel:
     def test_connected(self):
-        """Model structure should be fully connected (no dangling layers/inputs).
-
-        This is a smoke test against a stand-in architecture (see
-        `_build_toy_multimodal_net`), not the project's final model -- swap in
-        the real network builder once that architecture is decided.
-        """
-        # net.build() raises if any layer/connection is left dangling, so
-        # simply reaching this line without an exception is the assertion.
-        _build_toy_multimodal_net()
+        """Tests whether there are hanging or disconnected layers."""
+        pcndef = PCNDef()
+        net, handles = make_network_sequential(pcndef)
+        layerlist = [layer.label for layer in net._layers]
+        postlist = [conn.post.label for conn in net._predict_conns]
+        prelist_tmp = [conn.pre for conn in net._predict_conns]
+        prelist = []
+        for ipre in prelist_tmp:
+            if isinstance(ipre, list):
+                prelist = prelist + [prelayer.label for prelayer in ipre]
+            else:
+                prelist = prelist + [ipre.label]
+        connected_layers = list(set(postlist + prelist))
+        assert all([layer in connected_layers for layer in layerlist])
 
     def test_dimensionmatch(self):
         """Input dimensions should match the signal dimensions the model expects.

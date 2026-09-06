@@ -1,7 +1,11 @@
 import pcn
 
 class PCNDef:
+    """Class defining structure of PCN network."""
+    model_name = 'mymodel'
+    architecture = 'sequential'
     img_size = 1280
+    img_dims = (960, 1280)
     aud_size = 4096
     n_img_hidden = 1
     n_aud_hidden = 1
@@ -19,6 +23,35 @@ class PCNDef:
     mels = 32
     griffin_lim_iters = 4
 
+    def __init__(self,
+                 model_name='mymodel',
+                 architecture='sequential',
+                 img_size=1280,
+                 img_dims=(960,1280),
+                 aud_size=4096,
+                 n_img_hidden=1,
+                 n_aud_hidden=1,
+                 img_hidden_size=512,
+                 aud_hidden_size=512,
+                 n_joint_hidden=0,
+                 joint_hidden_size=256,
+                 n_classes=2,
+                 model_type='desc'):
+
+        self.model_name = model_name
+        self.architecture = architecture
+        self.img_size = img_size
+        self.img_dims = img_dims
+        self.aud_size = aud_size
+        self.n_img_hidden = n_img_hidden
+        self.n_aud_hidden = n_aud_hidden
+        self.img_hidden_size = img_hidden_size
+        self.aud_hidden_size = aud_hidden_size
+        self.n_joint_hidden = n_joint_hidden
+        self.joint_hidden_size = joint_hidden_size
+        self.n_classes = n_classes
+        self.model_type = model_type
+
 def default_params():
     """Set default parameters for PCN construction."""
 
@@ -27,19 +60,23 @@ def make_network_sequential(pcndef):
     # Flexible for number of hidden and joint layers
     net = pcn.PCNetwork()
     with net:
-        l_img_input = pcn.Layer(
-            dim=pcndef.image_size,
-            activation=pcn.Direct(),
-            label="image"
+        # l_img_input = pcn.Layer(
+        #     dim=pcndef.image_size,
+        #     activation=pcn.Direct(),
+        #     label="image"
+        # )
+        l_img_input = pcn.VisualInput(
+            in_shape=pcndef.img_dims,
+            label="l_img_input"
         )
         l_aud_input = pcn.AuditoryInput(
-            n_samples=pcndef.audio_size,
+            n_samples=pcndef.aud_size,
             sr=pcndef.audiorate,
             n_fft=pcndef.n_fft,
             hop=pcndef.hop,
             n_mels=pcndef.mels,
             griffin_lim_iters=pcndef.griffin_lim_iters,
-            label="aud"
+            label="l_aud_input"
         )
         # Hidden layers
         l_img_hidden = [pcn.Layer(
@@ -65,16 +102,21 @@ def make_network_sequential(pcndef):
         else:
             joint_layerlist = [l_out]
         # Define edges connecting within layers
-        # For now, restricted to bottom-up sequential connections
         img_layerlist = [l_img_input] + l_img_hidden
         aud_layerlist = [l_aud_input] + l_aud_hidden
-        map(lambda i: pcn.Predict(img_layerlist[i], img_layerlist[i+1]), range(len(img_layerlist) - 1))
-        map(lambda i: pcn.Predict(aud_layerlist[i], aud_layerlist[i+1]), range(len(aud_layerlist) - 1))
+        for i in range(len(img_layerlist) - 1):
+            pcn.Predict(img_layerlist[i], img_layerlist[i+1])
+        for i in range(len(aud_layerlist) - 1):
+            pcn.Predict(aud_layerlist[i], aud_layerlist[i+1])
+        # map(lambda i: pcn.Predict(img_layerlist[i], img_layerlist[i+1]), range(len(img_layerlist) - 1))
+        # map(lambda i: pcn.Predict(aud_layerlist[i], aud_layerlist[i+1]), range(len(aud_layerlist) - 1))
         # Link sensory
         pcn.Predict([img_layerlist[-1], aud_layerlist[-1]], joint_layerlist[0])
         # Iterate through joint layers, if present
         if len(joint_layerlist) > 1:
-            map(lambda i: pcn.Predict(joint_layerlist[i], joint_layerlist[i+1]), range(len(joint_layerlist) - 1))
+            for i in range(len(joint_layerlist) - 1):
+                pcn.Predict(joint_layerlist[i], joint_layerlist[i+1])
+            # map(lambda i: pcn.Predict(joint_layerlist[i], joint_layerlist[i+1]), range(len(joint_layerlist) - 1))
 
     handles = dict(
         l_img_input=l_img_input,
